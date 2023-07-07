@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,38 +13,10 @@ import (
 	"strings"
 )
 
-var htmlTemplate = `
-<!DOCTYPE html>
-<html>
-	<head>
-		<title>Image Processor</title>
-	</head>
-	<body>
-		<form action="/process" method="post">
-			<h3>Enter image URLs:</h3>
-			<input type="text" name="url1" size="100"><br>
-			<input type="text" name="url2" size="100"><br>
-			<input type="text" name="url3" size="100"><br>
-			<input type="text" name="url4" size="100"><br>
-			<input type="text" name="url5" size="100"><br>
-			<label for="color">Hex Color Code:</label><br>
-			<input type="color" name="color" id="color" value="#FF0000">
-			<input type="submit" value="Submit">
-		</form>
-		{{if .}}
-			<h2>Processed Images</h2>
-			{{range .}}
-				<img src="{{.}}" width="300">
-			{{end}}
-		{{end}}
-	</body>
-</html>
-`
-
 var tpl *template.Template
 
 func init() {
-	tpl = template.Must(template.New("webpage").Parse(htmlTemplate))
+	tpl = template.Must(template.ParseFiles("index.html"))
 }
 
 func main() {
@@ -57,10 +30,53 @@ func renderForm(w http.ResponseWriter, r *http.Request) {
 	tpl.Execute(w, nil)
 }
 
-func processImages(w http.ResponseWriter, r *http.Request) {
-	//urls := strings.Split(r.FormValue("urls"), ",")
+func handleFileUpload(r *http.Request) ([]string, error) {
 	color := r.FormValue("color")
+	processedImagePaths := make([]string, 0)
 
+	for i := 1; i <= 5; i++ {
+		file, _, err := r.FormFile(fmt.Sprintf("image%d", i))
+		if err != nil {
+			if err == http.ErrMissingFile {
+				// Skip if no file was uploaded in this input
+				continue
+			}
+			fmt.Println("Error retrieving the file:", err)
+			return processedImagePaths, err
+		}
+		defer file.Close()
+
+		// Create a temporary file to save the uploaded file
+		tempFile, err := ioutil.TempFile("images", "token_*.png")
+		if err != nil {
+			fmt.Println("Error creating temp file:", err)
+			return processedImagePaths, err
+		}
+		defer tempFile.Close()
+
+		// Save the uploaded file to the temporary file
+		_, err = io.Copy(tempFile, file)
+		if err != nil {
+			fmt.Println("Error saving file:", err)
+			return processedImagePaths, err
+		}
+
+		fmt.Println("Uploaded File:", tempFile.Name())
+
+		// Process the image and add to the list
+		newFilePath, err := ProcessImage(tempFile.Name(), parseHexColor(color))
+		if err != nil {
+			return processedImagePaths, err
+		}
+
+		processedImagePaths = append(processedImagePaths, newFilePath)
+	}
+
+	return processedImagePaths, nil
+}
+
+func handleUrlUpload(r *http.Request) ([]string, error) {
+	color := r.FormValue("color")
 	processedImagePaths := make([]string, 0)
 
 	for i := 1; i <= 5; i++ {
@@ -78,14 +94,34 @@ func processImages(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		fmt.Println("Image Saved " + filePath)
+		fmt.Println("Uploaded File:", filePath)
 
 		newFilePath, err := ProcessImage(filePath, parseHexColor(color))
 		if err != nil {
-			http.Error(w, "Error processing image: "+err.Error(), http.StatusInternalServerError)
+			return processedImagePaths, err
 		}
 
 		processedImagePaths = append(processedImagePaths, newFilePath)
+	}
+
+	return processedImagePaths, nil
+}
+
+func processImages(w http.ResponseWriter, r *http.Request) {
+	isFileUpload := r.FormValue("toggle") == "on"
+	var processedImagePaths []string
+	var err error
+
+	if isFileUpload {
+		processedImagePaths, err = handleFileUpload(r)
+		if err != nil {
+			http.Error(w, "Error processing image: "+err.Error(), http.StatusInternalServerError)
+		}
+	} else {
+		processedImagePaths, err = handleUrlUpload(r)
+		if err != nil {
+			http.Error(w, "Error processing image: "+err.Error(), http.StatusInternalServerError)
+		}
 	}
 
 	tpl.Execute(w, processedImagePaths)

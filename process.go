@@ -6,7 +6,6 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
-	"image/jpeg"
 	"image/png"
 	"log"
 	"math"
@@ -28,7 +27,7 @@ func ProcessImage(imagePath string, c color.Color) (string, error) {
 	}
 	defer file.Close()
 
-	srcImage, format, err := image.Decode(file)
+	srcImage, _, err := image.Decode(file)
 	if err != nil {
 		return "", err
 	}
@@ -90,15 +89,7 @@ func ProcessImage(imagePath string, c color.Color) (string, error) {
 	}
 	defer newFile.Close()
 
-	// Encode and save the processed image
-	switch format {
-	case "jpeg", "jpg":
-		err = jpeg.Encode(newFile, dcScaled.Image(), nil)
-	case "png":
-		err = png.Encode(newFile, dcScaled.Image())
-	default:
-		log.Fatalf("Unsupported file format: %s", format)
-	}
+	err = png.Encode(newFile, dcScaled.Image())
 	if err != nil {
 		log.Fatal(err)
 	}

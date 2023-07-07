@@ -1,41 +1,58 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <title>Image Processing</title>
-    <style>
-        img {
-            max-width: 500px;
-            margin-top: 20px;
-        }
-        .error {
-            color: red;
-        }
-    </style>
-</head>
-<body>
-    <h1>Image Processing</h1>
+    <head>
+        <title>Image Processor</title>
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                document.getElementById('toggle').addEventListener('change', function () {
+                    var isFileUpload = this.checked;
+                    document.getElementById('url-inputs').style.display = isFileUpload ? 'none' : 'block';
+                    document.getElementById('file-inputs').style.display = isFileUpload ? 'block' : 'none';
+                });
+            });
+        </script>
+        <style>
+            img {
+                max-width: 500px;
+                margin-top: 20px;
+            }
+            .error {
+                color: red;
+            }
+        </style>
+    </head>
+    <body>
+        <form action="/process" method="post" enctype="multipart/form-data">
+            <label for="toggle">Toggle to File Upload:</label>
+            <input type="checkbox" name="toggle" id="toggle"><br>
 
-    <form action="/" method="POST" enctype="multipart/form-data">
-        <label for="imageURLs">Image URLs (separated by comma):</label>
-        <br>
-        <input type="text" name="imageURLs" id="imageURLs" required>
-        <br>
-        <label for="color">Color:</label>
-        <br>
-        <input type="color" name="color" id="color" value="#000000">
-        <br>
-        <input type="submit" value="Process">
-    </form>
+            <div id="url-inputs">
+                <h3>Enter image URLs:</h3>
+                <input type="text" name="url1" size="100"><br>
+                <input type="text" name="url2" size="100"><br>
+                <input type="text" name="url3" size="100"><br>
+                <input type="text" name="url4" size="100"><br>
+                <input type="text" name="url5" size="100"><br>
+            </div>
 
-    {{if .HasImages}}
-        {{range .ProcessedImages}}
-            <h2>Processed Image</h2>
-            <img src="{{.}}">
+            <div id="file-inputs" style="display:none;">
+                <h3>Upload images:</h3>
+                <input type="file" name="image1" accept="image/png, image/jpeg"><br>
+                <input type="file" name="image2" accept="image/png, image/jpeg"><br>
+                <input type="file" name="image3" accept="image/png, image/jpeg"><br>
+                <input type="file" name="image4" accept="image/png, image/jpeg"><br>
+                <input type="file" name="image5" accept="image/png, image/jpeg"><br>
+            </div>
+            
+            <label for="color">Hex Color Code:</label><br>
+            <input type="color" name="color" id="color" value="#FF0000">
+            <input type="submit" value="Submit">
+        </form>
+        {{if .}}
+            <h2>Processed Images</h2>
+            {{range .}}
+                <img src="{{.}}" width="300">
+            {{end}}
         {{end}}
-    {{end}}
-
-    {{if .ErrorMessage}}
-        <p class="error">Error: {{.ErrorMessage}}</p>
-    {{end}}
-</body>
+    </body>
 </html>
