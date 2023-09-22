@@ -1,163 +1,144 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
-	"io"
-	"io/ioutil"
-	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
+	"time"
+
+	"github.com/fogleman/gg"
 )
 
-var tpl *template.Template
-
-func init() {
-	tpl = template.Must(template.ParseFiles("index.html"))
+type Config struct {
+	Scale       float64 `json:"scale"`
+	BorderWidth float64 `json:"borderWidth"`
+	OutputDir   string  `json:"outputDir"`
 }
 
 func main() {
-	http.HandleFunc("/", renderForm)
-	http.HandleFunc("/process", processImages)
-	http.HandleFunc("/images/", serveImage)
-	http.ListenAndServe(":8080", nil)
-}
+	path, err := ExecDir("config.json")
+	if err != nil {
+		fmt.Println("Error reading config:", err)
+		fmt.Scanf("h")
+		os.Exit(1)
+	}
+	config, err := readConfig(path)
+	if err != nil {
+		fmt.Println("Error reading config:", err)
+		fmt.Scanf("h")
+		os.Exit(1)
+	}
 
-func renderForm(w http.ResponseWriter, r *http.Request) {
-	tpl.Execute(w, nil)
-}
+	if len(os.Args) < 2 {
+		fmt.Println("Drag and drop image files onto this executable.")
+		fmt.Scanf("h")
+		os.Exit(1)
+	}
 
-func handleFileUpload(r *http.Request) ([]string, error) {
-	color := r.FormValue("color")
-	processedImagePaths := make([]string, 0)
+	if config.OutputDir[len(config.OutputDir)-1] != '/' {
+		config.OutputDir = config.OutputDir + "/"
+	}
 
-	for i := 1; i <= 5; i++ {
-		file, _, err := r.FormFile(fmt.Sprintf("image%d", i))
-		if err != nil {
-			if err == http.ErrMissingFile {
-				// Skip if no file was uploaded in this input
-				continue
+	for _, arg := range os.Args[1:] {
+		_, err := os.Stat(arg)
+		if os.IsNotExist(err) {
+			fmt.Printf("File not found: %s\n", arg)
+			fmt.Scanf("h")
+			continue
+		}
+
+		if isImageFile(arg) {
+			err = handleFile(arg, &config)
+			if err != nil {
+				fmt.Println("Error:", err)
+				fmt.Scanf("h")
+			} else {
+				fmt.Printf("Image processed %s\n", arg)
 			}
-			fmt.Println("Error retrieving the file:", err)
-			return processedImagePaths, err
-		}
-		defer file.Close()
-
-		// Create a temporary file to save the uploaded file
-		tempFile, err := ioutil.TempFile("images", "token_*.png")
-		if err != nil {
-			fmt.Println("Error creating temp file:", err)
-			return processedImagePaths, err
-		}
-		defer tempFile.Close()
-
-		// Save the uploaded file to the temporary file
-		_, err = io.Copy(tempFile, file)
-		if err != nil {
-			fmt.Println("Error saving file:", err)
-			return processedImagePaths, err
-		}
-
-		fmt.Println("Uploaded File:", tempFile.Name())
-
-		// Process the image and add to the list
-		newFilePath, err := ProcessImage(tempFile.Name(), parseHexColor(color))
-		if err != nil {
-			return processedImagePaths, err
-		}
-
-		processedImagePaths = append(processedImagePaths, newFilePath)
-	}
-
-	return processedImagePaths, nil
-}
-
-func handleUrlUpload(r *http.Request) ([]string, error) {
-	color := r.FormValue("color")
-	processedImagePaths := make([]string, 0)
-
-	for i := 1; i <= 5; i++ {
-		url := r.FormValue(fmt.Sprintf("url%d", i))
-		fmt.Println(url)
-		if url == "" {
-			continue
-		}
-
-		url = trimAfterExtension(strings.TrimSpace(url))
-		filePath, err := downloadImage(url)
-
-		if err != nil {
-			fmt.Println(err.Error())
-			continue
-		}
-
-		fmt.Println("Uploaded File:", filePath)
-
-		newFilePath, err := ProcessImage(filePath, parseHexColor(color))
-		if err != nil {
-			return processedImagePaths, err
-		}
-
-		processedImagePaths = append(processedImagePaths, newFilePath)
-	}
-
-	return processedImagePaths, nil
-}
-
-func processImages(w http.ResponseWriter, r *http.Request) {
-	isFileUpload := r.FormValue("toggle") == "on"
-	var processedImagePaths []string
-	var err error
-
-	if isFileUpload {
-		processedImagePaths, err = handleFileUpload(r)
-		if err != nil {
-			http.Error(w, "Error processing image: "+err.Error(), http.StatusInternalServerError)
-		}
-	} else {
-		processedImagePaths, err = handleUrlUpload(r)
-		if err != nil {
-			http.Error(w, "Error processing image: "+err.Error(), http.StatusInternalServerError)
+		} else {
+			fmt.Printf("Not an image file: %s\n", arg)
 		}
 	}
 
-	tpl.Execute(w, processedImagePaths)
+	exitChan := make(chan struct{})
+
+	// Set the duration to 5 seconds
+	duration := 5 * time.Second
+
+	fmt.Printf("Finished, exiting in %s...", duration.String())
+	// Start a goroutine to wait for the specified duration
+	go func() {
+		time.Sleep(duration)
+		close(exitChan) // Signal that the time is up
+	}()
+
+	// Wait for the signal or until the time is up
+	<-exitChan
+
 }
 
-func trimAfterExtension(inputURL string) string {
-	re := regexp.MustCompile(`(\.png|\.jpeg)(\?.*|$)`) // Regex to match .png or .jpeg followed by a query string or end of string
-	return re.ReplaceAllString(inputURL, "$1")
+func wrap(ft string, args ...any) error {
+	s := fmt.Sprintf(ft, args...)
+	return errors.New(s)
 }
 
-func serveImage(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, r.URL.Path[1:])
-}
-
-func downloadImage(url string) (string, error) {
-	resp, err := http.Get(url)
+func handleFile(file string, config *Config) error {
+	img, err := gg.LoadImage(file)
 	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	tokens := strings.Split(url, "/")
-	fileName := "images/" + tokens[len(tokens)-1]
-
-	ext := filepath.Ext(fileName)
-	if ext != ".png" && ext != ".jpeg" {
-		return "", errors.New("file is not a png or jpeg")
+		return wrap("Error loading image %s: %s\n", file, err)
 	}
 
-	os.MkdirAll("images", os.ModePerm)
-	file, err := os.Create(fileName)
+	img, err = processImage(img, config)
 	if err != nil {
-		return "", err
+		return wrap("Error processing image %s: %s\n", file, err)
+	}
+
+	newFilename := config.OutputDir + "token_" + filepath.Base(strings.Replace(file, "danimalsound_", "", 1))
+	err = gg.SavePNG(newFilename, img)
+	if err != nil {
+		return wrap("Error saving image %s: %s\n", newFilename, err)
+	}
+
+	return nil
+}
+
+// Check if a file has an image extension (you can expand this list)
+func isImageFile(filePath string) bool {
+	ext := filepath.Ext(filePath)
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".bmp":
+		return true
+	default:
+		return false
+	}
+}
+
+func readConfig(filePath string) (Config, error) {
+	var config Config
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return config, err
 	}
 	defer file.Close()
 
-	_, err = io.Copy(file, resp.Body)
-	return fileName, err
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&config); err != nil {
+		return config, err
+	}
+
+	return config, nil
+}
+
+func ExecDir(relPath string) (string, error) {
+	// os.Executable requires Go 1.18+
+	ex, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(filepath.Dir(ex), relPath), nil
 }

@@ -2,35 +2,20 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
-	"image/png"
-	"log"
 	"math"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/fogleman/gg"
 	"github.com/nfnt/resize"
 )
 
-func ProcessImage(imagePath string, c color.Color) (string, error) {
-	scale := 300.0
-	borderWidth := 10.0
-	// Placeholder: Open the image file
-	file, err := os.Open(imagePath)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
+func processImage(srcImage image.Image, config *Config) (image.Image, error) {
+	scale := config.Scale
+	borderWidth := config.BorderWidth
 
-	srcImage, _, err := image.Decode(file)
-	if err != nil {
-		return "", err
-	}
+	tint := getAverageColorWithAdjustments(srcImage, 100, 10)
 
 	// Create a new transparent image with the same dimensions as the source image
 	dstImage := image.NewRGBA(srcImage.Bounds())
@@ -59,7 +44,7 @@ func ProcessImage(imagePath string, c color.Color) (string, error) {
 	scaledDstRGBA, ok := scaledDstImage.(*image.RGBA)
 
 	if !ok {
-		return "", errors.New("failed to convert scaledDstImage to *image.RGBA")
+		return nil, errors.New("failed to convert scaledDstImage to *image.RGBA")
 	}
 
 	// Create a new context for drawing on the scaled destination image
@@ -76,45 +61,64 @@ func ProcessImage(imagePath string, c color.Color) (string, error) {
 
 	// Draw a circle border on the scaled destination image
 	dcScaled.SetLineWidth(borderWidth)
-	dcScaled.SetColor(c)
+	dcScaled.SetColor(tint)
 	dcScaled.DrawCircle(centerX, centerY, scaledRadius)
 	dcScaled.Stroke()
 
-	newFilename := "token_" + filepath.Base(strings.Replace(imagePath, "danimalsound_", "", 1))
-	newFilePath := filepath.Join(filepath.Dir(imagePath), newFilename)
-	newFile, err := os.Create(newFilePath)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer newFile.Close()
-
-	err = png.Encode(newFile, dcScaled.Image())
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return newFilePath, nil
+	return dcScaled.Image(), nil
 }
 
-// parseHexColor parses a hex color code (#RRGGBB) and returns the corresponding color.Color.
-func parseHexColor(hexCode string) color.Color {
-	hexCode = strings.TrimPrefix(hexCode, "#")
+// Get the average color of an image with brightness and contrast adjustments
+func getAverageColorWithAdjustments(img image.Image, brightnessAdjustment int, contrastAdjustment float64) color.RGBA {
+	bounds := img.Bounds()
+	var sumR, sumG, sumB uint64
+	numPixels := uint64(bounds.Dx() * bounds.Dy())
 
-	if len(hexCode) != 6 {
-		return color.Black
+	// Sum the color channels for all pixels
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			sumR += uint64(r)
+			sumG += uint64(g)
+			sumB += uint64(b)
+		}
 	}
 
-	r := parseHexComponent(hexCode[0:2])
-	g := parseHexComponent(hexCode[2:4])
-	b := parseHexComponent(hexCode[4:6])
+	// Calculate the mean values for each channel
+	avgR := uint8(sumR / numPixels >> 8)
+	avgG := uint8(sumG / numPixels >> 8)
+	avgB := uint8(sumB / numPixels >> 8)
 
-	return color.RGBA{r, g, b, 255}
+	// Apply brightness and contrast adjustments
+	avgR = adjustBrightness(avgR, brightnessAdjustment)
+	avgG = adjustBrightness(avgG, brightnessAdjustment)
+	avgB = adjustBrightness(avgB, brightnessAdjustment)
+
+	avgR = adjustContrast(avgR, avgR, contrastAdjustment)
+	avgG = adjustContrast(avgG, avgG, contrastAdjustment)
+	avgB = adjustContrast(avgB, avgB, contrastAdjustment)
+
+	return color.RGBA{avgR, avgG, avgB, 255}
 }
 
-// parseHexComponent parses a hexadecimal component and returns its integer value.
-func parseHexComponent(hexComponent string) uint8 {
-	var value uint64
-	fmt.Sscanf(hexComponent, "%02x", &value)
-	return uint8(value)
+// Adjust brightness by adding a value to the color channel
+func adjustBrightness(value uint8, adjustment int) uint8 {
+	newValue := int(value) + adjustment
+	if newValue > 255 {
+		return 255
+	} else if newValue < 0 {
+		return 0
+	}
+	return uint8(newValue)
+}
+
+// Adjust contrast by scaling the difference from the mean color value
+func adjustContrast(value, mean uint8, adjustment float64) uint8 {
+	newValue := int(float64(value)-float64(mean)*adjustment) + int(mean)
+	if newValue > 255 {
+		return 255
+	} else if newValue < 0 {
+		return 0
+	}
+	return uint8(newValue)
 }
