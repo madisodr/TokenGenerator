@@ -42,6 +42,13 @@ func main() {
 		config.OutputDir = config.OutputDir + "/"
 	}
 
+	err = createOutputDir(config.OutputDir)
+	if err != nil {
+		fmt.Println("Unable to create output directory")
+		fmt.Scanf("h")
+		os.Exit(1)
+	}
+
 	for _, arg := range os.Args[1:] {
 		_, err := os.Stat(arg)
 		if os.IsNotExist(err) {
@@ -78,6 +85,17 @@ func main() {
 	// Wait for the signal or until the time is up
 	<-exitChan
 
+}
+
+func createOutputDir(path string) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		err := os.Mkdir(path, os.ModePerm)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func wrap(ft string, args ...any) error {
